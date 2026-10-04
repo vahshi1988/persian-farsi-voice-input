@@ -2,8 +2,6 @@
 Type=Application
 Name=Persian Voice Input
 Name[fa]=ورودی صوتی فارسی
-Comment=Local Persian dictation. Profanity is not blocked and will not be blocked.
-Comment[fa]=ورودی صوتی محلی فارسی؛ الفاظ رکیک به هیچ عنوان بلاک نشده‌اند و بلاک نمی‌شوند.
 Exec=voice-input --background --setup
 Icon=audio-input-microphone
 Terminal=false
