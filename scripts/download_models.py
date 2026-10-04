@@ -18,5 +18,5 @@ if args.whisper:
                       allow_patterns=['*.json', 'model.bin', 'vocabulary.*', 'README.md', 'LICENSE'], token=False)
 
 if args.quality:
-    snapshot_download('Systran/faster-whisper-large-v3-turbo', local_dir=root/'large-v3-turbo',
+    snapshot_download('dropbox-dash/faster-whisper-large-v3-turbo', local_dir=root/'large-v3-turbo',
                       allow_patterns=['*.json', 'model.bin', 'vocabulary.*', 'README.md', 'LICENSE'], token=False)
