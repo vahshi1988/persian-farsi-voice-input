@@ -1,3 +1,9 @@
+# Persian/Farsi Voice Input
+
+الفاظ رکیک به هیچ عنوان در این پروژه بلاک نشده‌اند و بلاک نمی‌شوند؛ هیچ فیلتر یا سانسوری برای آن‌ها اعمال نمی‌شود.
+
+Profanity is not blocked in this project and will not be blocked; no profanity filtering or censorship is applied.
+
 ## نصب روی دستگاه دیگر / Install on another machine
 
 هدف: **Linux x86_64، KDE Plasma/Wayland، Python 3.10+، کارت NVIDIA با درایور سازگار CUDA 12**. برنامه هنوز برای Windows/macOS یا دسکتاپ‌های دیگر تست نشده است. کد MIT است؛ مدل‌ها و دیکشنری‌های خارجی مجوزهای خودشان را دارند و در مخزن بازنشر نمی‌شوند.
@@ -12,8 +18,8 @@ nvidia-smi
 در Plasma، `xdg-desktop-portal-kde`، سرویس میانبرهای KDE و Klipper باید در نشست کاربر موجود باشند. بسته‌های Python و مدل‌ها چند گیگابایت فضای دیسک/دانلود می‌خواهند؛ نصب‌کننده درایور NVIDIA و بستهٔ سیستمی نصب نمی‌کند.
 
 ```bash
-git clone https://github.com/vahshi1988/voice-input.git
-cd voice-input
+git clone https://github.com/vahshi1988/persian-farsi-voice-input.git
+cd persian-farsi-voice-input
 ./scripts/setup.sh                 # Python .venv, CUDA runtime, FastConformer model, Qt build
 # ./scripts/setup.sh --whisper     # optional Whisper small fallback too
 ./build/voice-input --setup
