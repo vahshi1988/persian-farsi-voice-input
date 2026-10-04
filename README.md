@@ -1,5 +1,7 @@
 # ورودی صوتی فارسی برای KDE/Wayland
 
+[فارسی](#ورودی-صوتی-فارسی-برای-kdewayland) | [English](#persian-voice-input-for-kdewayland)
+
 برنامهٔ Qt 6 / C++ با پروژهٔ CMake قابل بازکردن در Qt Creator.
 
 ## اجرا
@@ -66,3 +68,77 @@ qdbus6 local.voiceinput.Controller /VoiceInput local.voiceinput.Controller.TestP
 - تنظیمات در `personal_dictionary.json` کنار سورس پروژه ذخیره می‌شوند و از ضبط بعدی اعمال خواهند شد.
 
 نشانی‌های اینترنتی، مسیرها، ایمیل، متن میان backtick و شناسه‌های چسبیده به حروف لاتین/عدد اصلاح نمی‌شوند. مرحلهٔ اصلاح به اینترنت یا نصب مدل جدید نیاز ندارد و از طریق هر دو موتور FastConformer و Whisper اجرا می‌شود.
+
+---
+
+<a id="persian-voice-input-for-kdewayland"></a>
+# Persian Voice Input for KDE/Wayland
+
+[فارسی](#ورودی-صوتی-فارسی-برای-kdewayland) | [English](#persian-voice-input-for-kdewayland)
+
+A Qt 6 / C++ application with a CMake project that can be opened in Qt Creator.
+
+## Build and run
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j1
+./build/voice-input --setup
+```
+
+In KDE, grant permission to control the **keyboard**. This permission is needed to send the paste shortcut; the application does not capture screenshots. Close the window to keep the application running in the system tray.
+
+- Click the destination text field and press `Ctrl+Alt+W` to start recording.
+- After you finish speaking, about two seconds of silence automatically ends the recording and inserts the text into the active field. The same shortcut can also stop recording manually.
+- Short pauses do not stop recording. Ten seconds without detected speech cancels it. Speech activity is detected locally with the small Silero VAD model, which runs on the CPU during recording. Whisper transcription still runs only on NVIDIA GPUs.
+- Keep the destination field focused until processing finishes; the text is sent to whichever field is active when it is submitted.
+- Press `Ctrl+Alt+Escape` to cancel recording or processing.
+- In terminal mode, enable `Ctrl+Shift+V` from the system-tray menu.
+- Closing the window does not stop the application. To exit, use **Quit** from the system-tray menu.
+
+This works with text fields that accept paste; not every Linux application has been tested individually. Text is placed on the clipboard, and Klipper may retain it in its history. The application keeps the latest text only until it exits, and removes the temporary audio file after processing.
+
+## Speech recognition, memory, and GPU
+
+The default engine is **Persian FastConformer / Shenava Koochik CTC**: an improved ONNX version from the NVIDIA FastConformer family, not the original model's unmodified weights. Model source: https://huggingface.co/PersianML/Shenava-Koochik-v1.0-sherpa-onnx . The model is expected in `models/fastconformer-fa`, with its separate Python environment in `fastconformer-venv`. Inference uses sherpa-onnx with CUDA 12 / cuDNN 9. The application checks the worker's GPU allocation with `nvidia-smi`; silently falling back to CPU is not accepted. The worker exits after each transcription to release memory.
+
+The system-tray menu has a **Persian FastConformer engine** option. Disabling it selects the previous Whisper small engine. The shortcut and Silero end-of-speech detection remain unchanged. Silero runs on the CPU, while transcription runs on NVIDIA.
+
+On **one** noisy conversational PSRB sample, character error rate after removing spaces and punctuation was about 14.2% for FastConformer and 29.2% for Whisper small. This is not a general evaluation or a guarantee of accuracy for your audio. FastConformer processed an approximately 12-second sample in 2.76 seconds, including model loading; peak RSS was about 1013 MiB, and GPU allocation during loading was 596 MiB. The GPU figure is not a peak-usage measurement. See `FASTCONFORMER_TEST.json` for details.
+
+If available RAM is below 1500 MiB for FastConformer or 1100 MiB for Whisper, the model is not loaded and the application asks you to close some applications. These thresholds do not guarantee that other applications will not consume memory concurrently. Maximum recording duration is 60 seconds and the processing timeout is 120 seconds.
+
+Dependencies for the original machine include Qt6 Widgets/DBus/Network, KDE kglobalaccel and Klipper, the XDG RemoteDesktop portal, `parec`, the Python environment at `~/.local/share/whisper/venv`, and that environment's NVIDIA libraries.
+
+The old `whisper-dictation.desktop / _launch` shortcut was transferred to this application; shortcuts belonging to other applications are not overwritten. To revert, remove the **Voice Input** shortcut in KDE's Shortcuts settings and assign `Ctrl+Alt+W` to Whisper Dictation.
+
+## Status and testing
+
+```bash
+qdbus6 local.voiceinput.Controller /VoiceInput local.voiceinput.Controller.GetStatus
+./build/voice-input --test-target --auto-exit
+```
+
+`GetStatus` reports permission, shortcut, recording state, and details of the latest transcription. To test insertion into a text field, use `TestPaste`; the command gives you three seconds to select the destination field:
+
+```bash
+qdbus6 local.voiceinput.Controller /VoiceInput local.voiceinput.Controller.TestPaste 'Hello, Persian test'
+```
+
+Implementation references:
+- https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html
+- https://github.com/SYSTRAN/faster-whisper
+
+## Persian word correction
+
+After speech recognition and before insertion, the installed Hunspell dictionary (`/usr/share/hunspell/fa_IR.*`) checks words. Valid words are left unchanged. At most one character from a limited set of similar characters is changed, and only when the dictionary has a unique alternative that is on the common-word list, or the preceding word makes one alternative unambiguous. This is not a language model and does not understand the meaning of entire sentences; it cannot correct a wrong-but-valid word or most word deletion and word-splitting errors. The common-word list is intentionally limited to reduce changes to names and terminology, but it cannot protect every unknown name.
+
+**Conservative word correction** can be disabled in the system-tray menu. The application window has **Corrected text** and **Raw text** tabs, as well as a list of changes; both texts can be copied. If the dictionary or settings file is invalid, the raw text is preserved and a warning is shown.
+
+Use **Personal words and corrections** to customize behavior:
+
+- **Protected names and terms:** enter one word per line. These words are never changed, even if a personal correction rule matches.
+- **Custom corrections:** enter one rule per line, such as `نخشه=نقشه`; the left side is the word to replace and the right side is its replacement. An explicit rule can also replace a valid word.
+- Settings are saved in `personal_dictionary.json` next to the project source and take effect on the next recording.
+
+URLs, paths, email addresses, text inside backticks, and identifiers adjacent to Latin letters or digits are not corrected. Word correction works offline, requires no additional model, and is applied with both FastConformer and Whisper.
