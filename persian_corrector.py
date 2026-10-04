@@ -4,6 +4,7 @@ import ctypes.util
 import json
 import re
 from pathlib import Path
+from runtime_paths import personal_dictionary_path
 
 WORD = re.compile(r'[\u0621-\u063a\u0641-\u064a\u0671-\u06d3\u200c]+')
 GROUPS = ('سصث', 'زذضظ', 'تط', 'قغخ', 'حه', 'اآ')
@@ -60,10 +61,7 @@ class Dictionary:
 
 
 def config_path():
-    root = Path(__file__).resolve().parent
-    if root.name == 'build':
-        root = root.parent
-    return root / 'personal_dictionary.json'
+    return personal_dictionary_path()
 
 
 def correct_text(text, enabled=True):

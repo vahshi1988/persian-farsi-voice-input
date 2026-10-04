@@ -77,10 +77,22 @@ public:
         connect(terminal, &QAction::toggled, this, [this](bool on) {
             terminalMode = on; settings.setValue("terminalMode", on);
         });
-        auto *engine = menu->addAction(QStringLiteral("موتور FastConformer فارسی"));
-        engine->setCheckable(true);
-        engine->setChecked(settings.value("fastconformer", true).toBool());
-        connect(engine, &QAction::toggled, this, [this](bool enabled) { settings.setValue("fastconformer", enabled); });
+        auto *engines = menu->addMenu(QStringLiteral("انتخاب موتور گفتار"));
+        auto *group = new QActionGroup(this);
+        group->setExclusive(true);
+        const QList<QPair<QString, QString>> choices{
+            {"fastconformer", QStringLiteral("FastConformer فارسی (پیش‌فرض)")},
+            {"small", QStringLiteral("Whisper small (کم‌حافظه)")},
+            {"large-v3-turbo", QStringLiteral("Whisper large-v3-turbo (مدل بزرگ‌تر)")}};
+        for (const auto &choice : choices) {
+            auto *action = engines->addAction(choice.second);
+            action->setCheckable(true); group->addAction(action);
+            action->setChecked(selectedModel() == choice.first);
+            connect(action, &QAction::triggered, this, [this, id = choice.first] {
+                settings.setValue("asrModel", id);
+                report(QStringLiteral("موتور برای ضبط بعدی: ") + id);
+            });
+        }
         auto *spelling = menu->addAction(QStringLiteral("اصلاح محافظه‌کارانهٔ واژه‌ها"));
         spelling->setCheckable(true);
         spelling->setChecked(settings.value("correctSpelling", true).toBool());
@@ -154,7 +166,7 @@ public slots:
     Q_SCRIPTABLE void Show() { show(); raise(); activateWindow(); }
     Q_SCRIPTABLE void Quit() { qApp->quit(); }
     Q_SCRIPTABLE QVariantMap GetStatus() const {
-        return {{"keyboardReady", keyboardReady}, {"shortcutsReady", shortcutsReady},
+        return {{"selectedModel", selectedModel()}, {"keyboardReady", keyboardReady}, {"shortcutsReady", shortcutsReady},
                 {"recording", recording}, {"processing", busy}, {"status", status->text()},
                 {"lastText", lastText}, {"backend", backend}, {"diagnostics", QString::fromUtf8(diagnostics)}};
     }
@@ -178,7 +190,7 @@ public slots:
         }
         if (recorder.state() != QProcess::NotRunning) return;
         if (!keyboardReady) { report(QStringLiteral("ابتدا مجوز صفحه‌کلید را از تنظیمات فعال کنید.")); return; }
-        const QString python = QDir::homePath() + "/.local/share/whisper/venv/bin/python";
+        const QString python = runtimePython(false);
         if (!QFile::exists(python) || QStandardPaths::findExecutable("parec").isEmpty()) {
             report(QStringLiteral("Whisper یا ابزار ضبط parec پیدا نشد.")); return;
         }
@@ -366,7 +378,8 @@ private:
         requestPath.clear(); setupBusy = false; closeSession(); report(error);
     }
     void editDictionary() {
-        const auto path = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../personal_dictionary.json");
+        const auto path = dictionaryPath();
+        QDir().mkpath(QFileInfo(path).absolutePath());
         QFile input(path);
         QJsonObject data;
         if (input.open(QIODevice::ReadOnly)) {
@@ -418,38 +431,54 @@ private:
         });
         dialog.exec();
     }
+    QString selectedModel() const {
+        const auto legacy = settings.value("fastconformer", true).toBool() ? "fastconformer" : "small";
+        const auto selected = settings.value("asrModel", legacy).toString();
+        return QStringList{"fastconformer", "small", "large-v3-turbo"}.contains(selected) ? selected : "fastconformer";
+    }
+    static QString runtimePython(bool fast) {
+        const auto override = qEnvironmentVariable(fast ? "VOICE_INPUT_FAST_PYTHON" : "VOICE_INPUT_PYTHON");
+        if (!override.isEmpty()) return override;
+        const auto root = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
+        const QStringList candidates{root + "/.venv/bin/python",
+            fast ? root + "/fastconformer-venv/bin/python" : QDir::homePath() + "/.local/share/whisper/venv/bin/python"};
+        for (const auto &path : candidates) if (QFileInfo(path).isExecutable()) return path;
+        return candidates.first();
+    }
+    static QString dictionaryPath() {
+        const auto override = qEnvironmentVariable("VOICE_INPUT_DICTIONARY");
+        if (!override.isEmpty()) return override;
+        const auto configHome = qEnvironmentVariable("XDG_CONFIG_HOME", QDir::homePath() + "/.config");
+        return configHome + "/voice-input/personal_dictionary.json";
+    }
     void transcribe() {
         workerTimeout.start(120000);
         if (worker.state() != QProcess::NotRunning) { worker.kill(); worker.waitForFinished(2000); }
         if (worker.state() == QProcess::NotRunning) {
             workerBuffer.clear(); diagnostics.clear();
-            const auto python = QDir::homePath() + "/.local/share/whisper/venv/bin/python";
+            const auto python = runtimePython(false);
+            const bool useFastConformer = selectedModel() == "fastconformer";
+            const auto workerPython = runtimePython(useFastConformer);
             QProcess paths;
-            paths.start(python, {"-c", "import site;print(site.getsitepackages()[0])"});
-            if (!paths.waitForFinished(5000) || paths.exitCode() != 0) {
-                busy = false; workerTimeout.stop(); cleanup(); report(QStringLiteral("محیط Whisper قابل اجرا نیست.")); return;
+            const QString probe = "import site,pathlib;print(':'.join(str(p/'lib') for base in site.getsitepackages() for p in (pathlib.Path(base)/'nvidia').glob('*') if (p/'lib').is_dir()))";
+            QStringList libraries;
+            for (const auto &interpreter : QStringList{python, workerPython}) {
+                paths.start(interpreter, {"-c", probe});
+                if (!paths.waitForFinished(5000) || paths.exitCode() != 0) {
+                    busy = false; workerTimeout.stop(); cleanup(); report(QStringLiteral("محیط Python قابل اجرا نیست؛ scripts/setup.sh را اجرا کنید.")); return;
+                }
+                libraries << QString::fromUtf8(paths.readAllStandardOutput()).trimmed();
             }
-            const auto packages = QString::fromUtf8(paths.readAllStandardOutput()).trimmed();
             auto environment = QProcessEnvironment::systemEnvironment();
-            environment.insert("LD_LIBRARY_PATH", packages + "/nvidia/cublas/lib:" + packages + "/nvidia/cudnn/lib:" + environment.value("LD_LIBRARY_PATH"));
+            environment.insert("LD_LIBRARY_PATH", libraries.join(':') + ":" + environment.value("LD_LIBRARY_PATH"));
             environment.insert("HF_HUB_OFFLINE", "1");
+            environment.insert("VOICE_INPUT_DICTIONARY", dictionaryPath());
             worker.setProcessEnvironment(environment);
-            const bool useFastConformer = settings.value("fastconformer", true).toBool();
-            const auto root = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
-            if (useFastConformer) {
-                QDir nvidia(root + "/fastconformer-venv/lib/python3.14/site-packages/nvidia");
-                QStringList libraries;
-                for (const auto &folder : nvidia.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
-                    libraries << nvidia.absoluteFilePath(folder + "/lib");
-                environment.insert("LD_LIBRARY_PATH", libraries.join(':') + ":" + environment.value("LD_LIBRARY_PATH"));
-                worker.setProcessEnvironment(environment);
-            }
-            const auto workerPython = useFastConformer ? root + "/fastconformer-venv/bin/python" : python;
             const auto workerScript = useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
             worker.start(workerPython, {QCoreApplication::applicationDirPath() + workerScript});
             if (!worker.waitForStarted(3000)) return;
         }
-        QJsonObject request{{"path", rawPath}, {"language", "fa"}, {"correctSpelling", settings.value("correctSpelling", true).toBool()}};
+        QJsonObject request{{"path", rawPath}, {"language", "fa"}, {"model", selectedModel()}, {"correctSpelling", settings.value("correctSpelling", true).toBool()}};
         worker.write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
     }
     bool setClipboard(const QString &text) {

@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from persian_corrector import correct_text
+from runtime_paths import model_root
 
 ctypes.CDLL(None).prctl(1, signal.SIGTERM)
 if os.getppid() == 1:
@@ -26,10 +27,7 @@ try:
     audio_path = Path(request['path'])
     import numpy as np
     import sherpa_onnx
-    model_dir = Path(__file__).resolve().parent
-    if model_dir.name == 'build':
-        model_dir = model_dir.parent
-    model_dir /= 'models/fastconformer-fa'
+    model_dir = model_root() / 'fastconformer-fa'
     if not (model_dir / 'model.onnx').is_file():
         raise RuntimeError('مدل FastConformer فارسی هنوز دانلود نشده است.')
     reply(status='بارگذاری FastConformer فارسی روی NVIDIA…')

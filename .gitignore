@@ -5,3 +5,12 @@ __pycache__/
 models/
 
 fastconformer-venv/
+
+.venv/
+personal_dictionary.json
+*.wav
+*.pcm
+*.log
+.env
+.env.*
+!.env.example

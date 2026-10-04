@@ -34,3 +34,11 @@
 - Seven tests passed: actual Persian spelling corrections, preservation of names/valid colloquial words/identifiers/URLs/paths/code, disabling correction, personal protected words and explicit rules, ambiguous suggestions, contextual disambiguation, and dictionary failure fallback.
 - Real application status after speech showed `device: cuda`, `originalText`, `text`, and `corrections`; raw text was preserved and the active Qt field received output. The requested benchmark diagnostic call was declined while the application was busy; this was not counted as a benchmark run.
 - Automatic correction uses only one-letter confusions plus an allowlist/collocation gate. It does not provide full sentence semantics, and protecting every unknown proper name is not guaranteed. Users can explicitly protect terminology.
+
+## Portable publication and model selection
+
+- Removed fixed home-directory desktop launchers; installer generates actual checkout paths and validates under temporary XDG directories.
+- Added project-local Python setup, matching-ABI CUDA wheel selection, optional model download, MIT application-code license, and third-party attribution.
+- Added XDG personal-dictionary storage and non-overwriting migration; private checkout dictionaries are ignored and removed from Git tracking.
+- Eleven isolated dictionary/runtime/model-choice tests pass; Python compile checks and bash syntax checks pass; Qt Release build passes.
+- FastConformer remains the default. The menu now offers Whisper small and large-v3-turbo, with explicit downloads and 1100/3000 MiB available-RAM gates respectively. Larger-model inference is not rerun on the low-RAM laptop; full fresh Python/CUDA installation is documented but was not repeated on this already-configured machine.

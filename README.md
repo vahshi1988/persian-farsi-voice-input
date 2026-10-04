@@ -1,3 +1,48 @@
+## نصب روی دستگاه دیگر / Install on another machine
+
+هدف: **Linux x86_64، KDE Plasma/Wayland، Python 3.10+، کارت NVIDIA با درایور سازگار CUDA 12**. برنامه هنوز برای Windows/macOS یا دسکتاپ‌های دیگر تست نشده است. کد MIT است؛ مدل‌ها و دیکشنری‌های خارجی مجوزهای خودشان را دارند و در مخزن بازنشر نمی‌شوند.
+
+Ubuntu/Debian prerequisites (install the NVIDIA driver through your distribution separately):
+
+```bash
+sudo apt install cmake g++ qt6-base-dev python3-venv pulseaudio-utils hunspell-fa libhunspell-1.7-0
+nvidia-smi
+```
+
+در Plasma، `xdg-desktop-portal-kde`، سرویس میانبرهای KDE و Klipper باید در نشست کاربر موجود باشند. بسته‌های Python و مدل‌ها چند گیگابایت فضای دیسک/دانلود می‌خواهند؛ نصب‌کننده درایور NVIDIA و بستهٔ سیستمی نصب نمی‌کند.
+
+```bash
+git clone https://github.com/vahshi1988/voice-input.git
+cd voice-input
+./scripts/setup.sh                 # Python .venv, CUDA runtime, FastConformer model, Qt build
+# ./scripts/setup.sh --whisper     # optional Whisper small fallback too
+./build/voice-input --setup
+python3 scripts/install_desktop.py --autostart
+```
+
+Grant the KDE keyboard permission yourself. The app transcribes locally; first-time setup downloads public models and packages. The setup command selects the CUDA wheel matching your Python ABI through the official sherpa-onnx wheel index; if no compatible wheel exists, installation fails instead of compiling CUDA or changing your driver. Launchers point to this checkout, so regenerate them if you move it. They start after **Plasma login**, not before graphical login.
+
+### مسیرهای قابل تنظیم / Runtime overrides
+
+- `.venv/bin/python` is the default interpreter for capture and ASR.
+- `VOICE_INPUT_PYTHON`: capture/Whisper interpreter override.
+- `VOICE_INPUT_FAST_PYTHON`: FastConformer interpreter override.
+- `VOICE_INPUT_MODEL_DIR`: models directory (default: `models` next to this checkout).
+- `VOICE_INPUT_DICTIONARY`: personal dictionary file override.
+- Personal words normally live in `$XDG_CONFIG_HOME/voice-input/personal_dictionary.json` (default `~/.config/voice-input/…`); they are never committed. `personal_dictionary.example.json` shows the format. The desktop installer migrates an existing checkout dictionary only when the destination does not exist.
+- Existing installations may still use `fastconformer-venv` and the earlier Whisper environment; these are compatibility fallbacks, not prerequisites for a new installation.
+
+Tests and model download can also be run independently:
+
+```bash
+python3 -m unittest test_persian_corrector.py test_runtime_paths.py
+.venv/bin/python scripts/download_models.py --whisper
+```
+
+Third-party sources/licenses: [FastConformer/Shenava model](https://huggingface.co/PersianML/Shenava-Koochik-v1.0-sherpa-onnx), [optional Whisper model](https://huggingface.co/Systran/faster-whisper-small), [faster-whisper/Silero integration](https://github.com/SYSTRAN/faster-whisper), [sherpa-onnx CUDA installation](https://k2-fsa.github.io/sherpa/onnx/python/install.html). Review their licenses before redistributing models or binaries. The project MIT license covers this repository's application code.
+
+---
+
 # ورودی صوتی فارسی برای KDE/Wayland
 
 [فارسی](#ورودی-صوتی-فارسی-برای-kdewayland) | [English](#persian-voice-input-for-kdewayland)
@@ -28,7 +73,7 @@ cmake --build build -j1
 
 موتور پیش‌فرض اکنون **FastConformer فارسی / Shenava Koochik CTC** است: نسخهٔ ONNX بهبود‌یافته از خانوادهٔ FastConformer NVIDIA، نه وزن‌های دست‌نخوردهٔ مدل اصلی. منبع مدل: https://huggingface.co/PersianML/Shenava-Koochik-v1.0-sherpa-onnx . مدل در `models/fastconformer-fa` و محیط جدا در `fastconformer-venv` است. اجرای CUDA 12 / cuDNN 9 با sherpa-onnx انجام می‌شود. وجود تخصیص GPU متعلق به worker با nvidia-smi کنترل می‌شود؛ برگشت خاموش به CPU پذیرفته نمی‌شود. worker بعد از هر پردازش خارج می‌شود تا حافظه آزاد شود.
 
-در منوی کنار ساعت گزینهٔ «موتور FastConformer فارسی» فعال است. غیرفعال‌کردن آن موتور قبلی Whisper small را انتخاب می‌کند. میانبر و تشخیص پایان گفتار با Silero تغییر نکرده‌اند. Silero روی CPU، ولی تبدیل متن روی NVIDIA اجرا می‌شود.
+در منوی کنار ساعت، «انتخاب موتور گفتار» سه حالت FastConformer فارسی، Whisper small و Whisper large-v3-turbo دارد. انتخاب برای ضبط بعدی ذخیره می‌شود. میانبر و تشخیص پایان گفتار با Silero تغییر نکرده‌اند. Silero روی CPU، ولی تبدیل متن روی NVIDIA اجرا می‌شود.
 
 آزمایش روی **یک نمونهٔ** محاوره‌ای پرنویز از PSRB، خطای کاراکتر پس از حذف فاصله و نشانه‌گذاری: FastConformer حدود ۱۴٫۲٪ و Whisper small حدود ۲۹٫۲٪. این نتیجه ارزیابی عمومی یا تضمین دقت برای صدای شما نیست. FastConformer نمونهٔ حدود ۱۲ ثانیه‌ای را با بارگذاری مدل در ۲٫۷۶ ثانیه پردازش کرد؛ اوج RSS حدود ۱۰۱۳ MiB و تخصیص GPU هنگام بارگذاری ۵۹۶ MiB بود. عدد GPU اندازه‌گیری اوج مصرف نیست. جزئیات در `FASTCONFORMER_TEST.json` قرار دارد.
 
@@ -65,7 +110,7 @@ qdbus6 local.voiceinput.Controller /VoiceInput local.voiceinput.Controller.TestP
 
 - اسم‌ها و اصطلاحات محافظت‌شده: هر واژه یک خط؛ این واژه‌ها حتی با وجود قانون اصلاح شخصی عوض نمی‌شوند.
 - اصلاح دلخواه: هر خط مانند `نخشه=نقشه`؛ سمت چپ یک واژه و سمت راست جایگزین دلخواه است. این قانون صریح می‌تواند واژهٔ معتبر را هم عوض کند.
-- تنظیمات در `personal_dictionary.json` کنار سورس پروژه ذخیره می‌شوند و از ضبط بعدی اعمال خواهند شد.
+- تنظیمات در `~/.config/voice-input/personal_dictionary.json` ذخیره می‌شوند و از ضبط بعدی اعمال خواهند شد.
 
 نشانی‌های اینترنتی، مسیرها، ایمیل، متن میان backtick و شناسه‌های چسبیده به حروف لاتین/عدد اصلاح نمی‌شوند. مرحلهٔ اصلاح به اینترنت یا نصب مدل جدید نیاز ندارد و از طریق هر دو موتور FastConformer و Whisper اجرا می‌شود.
 
@@ -100,9 +145,9 @@ This works with text fields that accept paste; not every Linux application has b
 
 ## Speech recognition, memory, and GPU
 
-The default engine is **Persian FastConformer / Shenava Koochik CTC**: an improved ONNX version from the NVIDIA FastConformer family, not the original model's unmodified weights. Model source: https://huggingface.co/PersianML/Shenava-Koochik-v1.0-sherpa-onnx . The model is expected in `models/fastconformer-fa`, with its separate Python environment in `fastconformer-venv`. Inference uses sherpa-onnx with CUDA 12 / cuDNN 9. The application checks the worker's GPU allocation with `nvidia-smi`; silently falling back to CPU is not accepted. The worker exits after each transcription to release memory.
+The default engine is **Persian FastConformer / Shenava Koochik CTC**: an improved ONNX version from the NVIDIA FastConformer family, not the original model's unmodified weights. Model source: https://huggingface.co/PersianML/Shenava-Koochik-v1.0-sherpa-onnx . The model is expected in `models/fastconformer-fa`, with Python dependencies in `.venv` (the existing `fastconformer-venv` remains a compatibility fallback). Inference uses sherpa-onnx with CUDA 12 / cuDNN 9. The application checks the worker's GPU allocation with `nvidia-smi`; silently falling back to CPU is not accepted. The worker exits after each transcription to release memory.
 
-The system-tray menu has a **Persian FastConformer engine** option. Disabling it selects the previous Whisper small engine. The shortcut and Silero end-of-speech detection remain unchanged. Silero runs on the CPU, while transcription runs on NVIDIA.
+The tray **Speech engine selection** submenu provides FastConformer, Whisper small, and Whisper large-v3-turbo. The selection is saved for the next recording. The shortcut and Silero end-of-speech detection remain unchanged. Silero runs on the CPU, while transcription runs on NVIDIA.
 
 On **one** noisy conversational PSRB sample, character error rate after removing spaces and punctuation was about 14.2% for FastConformer and 29.2% for Whisper small. This is not a general evaluation or a guarantee of accuracy for your audio. FastConformer processed an approximately 12-second sample in 2.76 seconds, including model loading; peak RSS was about 1013 MiB, and GPU allocation during loading was 596 MiB. The GPU figure is not a peak-usage measurement. See `FASTCONFORMER_TEST.json` for details.
 
@@ -139,6 +184,25 @@ Use **Personal words and corrections** to customize behavior:
 
 - **Protected names and terms:** enter one word per line. These words are never changed, even if a personal correction rule matches.
 - **Custom corrections:** enter one rule per line, such as `نخشه=نقشه`; the left side is the word to replace and the right side is its replacement. An explicit rule can also replace a valid word.
-- Settings are saved in `personal_dictionary.json` next to the project source and take effect on the next recording.
+- Settings are saved in `~/.config/voice-input/personal_dictionary.json` and take effect on the next recording.
 
 URLs, paths, email addresses, text inside backticks, and identifiers adjacent to Latin letters or digits are not corrected. Word correction works offline, requires no additional model, and is applied with both FastConformer and Whisper.
+
+
+## انتخاب مدل برای دستگاه قوی‌تر / Larger-model option
+
+از منوی کنار ساعت **انتخاب موتور گفتار** استفاده کنید. مدل پیش‌فرض بدون تغییر FastConformer فارسی است. دستگاه‌های قوی‌تر می‌توانند مدل بزرگ‌تر Whisper large-v3-turbo را دانلود و انتخاب کنند:
+
+```bash
+.venv/bin/python scripts/download_models.py --quality
+# Alternatively include it during first setup:
+# ./scripts/setup.sh --quality
+```
+
+| Engine | Available RAM checked before load | Notes |
+|---|---:|---|
+| FastConformer Persian | 1500 MiB | Default Persian-specific model |
+| Whisper small | 1100 MiB | Lowest RAM threshold; optional `--whisper` download |
+| Whisper large-v3-turbo | 3000 MiB | Larger model, beam size 5; optional `--quality` download |
+
+These checks measure **available RAM**, not total installed RAM. They are conservative startup gates, not guarantees of fitting in memory; NVIDIA VRAM and other running applications also matter. All three ASR modes use CUDA and exit after each recording. No CPU fallback is enabled. Selecting an unavailable model gives a download instruction rather than silently switching engines. Larger Whisper may improve recognition over small, but is not guaranteed to outperform Persian FastConformer for your speech; compare the same recordings. Large-model inference has not been rerun on the original low-RAM laptop as part of this portability change.

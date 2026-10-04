@@ -6,6 +6,17 @@ from unittest.mock import patch
 import persian_corrector as corrector
 
 class CorrectionTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.config = Path(self.folder.name)/'empty.json'
+        self.config.write_text('{"words": [], "replacements": {}}')
+        self.config_patch = patch.object(corrector, 'config_path', return_value=self.config)
+        self.config_patch.start()
+
+    def tearDown(self):
+        self.config_patch.stop()
+        self.folder.cleanup()
+
     def test_real_dictionary_and_punctuation(self):
         result = corrector.correct_text('طبق نخشه جلو بریم؛ حافضه پر شد.')
         self.assertEqual(result['text'], 'طبق نقشه جلو بریم؛ حافظه پر شد.')

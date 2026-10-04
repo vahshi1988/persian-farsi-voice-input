@@ -1,0 +1,8 @@
+# CUDA 12 ASR dependencies; NVIDIA driver remains a system prerequisite.
+faster-whisper==1.2.1
+numpy
+huggingface-hub
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-curand-cu12
+nvidia-cuda-runtime-cu12
