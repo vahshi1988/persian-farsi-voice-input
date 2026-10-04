@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Persian Voice Input
+Name[fa]=ورودی صوتی فارسی
+Comment=Local Persian dictation into the active text field
+Exec=/home/vahshi/claude/voice-input/build/voice-input --setup
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=true

@@ -1,0 +1,18 @@
+{
+  "sample": "PartAI/PSRB Files/audio_1.wav",
+  "durationSeconds": 11.877,
+  "normalization": "NFKC, Arabic kaf/yeh converted, whitespace and punctuation removed",
+  "results": {
+    "FastConformer": {
+      "normalizedCharacterErrorPercent": 14.2,
+      "peakRamMiB": 1013,
+      "device": "cuda"
+    },
+    "Whisper small": {
+      "normalizedCharacterErrorPercent": 29.2,
+      "peakRamMiB": 711,
+      "device": "cuda"
+    }
+  },
+  "limitation": "Single noisy multi-speaker cartoon sample; not a general accuracy benchmark."
+}
