@@ -42,3 +42,15 @@
 - Added XDG personal-dictionary storage and non-overwriting migration; private checkout dictionaries are ignored and removed from Git tracking.
 - Eleven isolated dictionary/runtime/model-choice tests pass; Python compile checks and bash syntax checks pass; Qt Release build passes.
 - FastConformer remains the default. The menu now offers Whisper small and large-v3-turbo, with explicit downloads and 1100/3000 MiB available-RAM gates respectively. Larger-model inference is not rerun on the low-RAM laptop; full fresh Python/CUDA installation is documented but was not repeated on this already-configured machine.
+
+## Experimental local Persian/English mode
+
+- Added persistent Persian/mixed language selection and optional Qwen3-ASR 0.6B INT8 using the existing sherpa-onnx CUDA environment. Whisper mixed mode uses multilingual transcription and never the translation task.
+- The 853,425,113-byte model archive was downloaded on srv70, copied to the user's private Google Drive folder, downloaded to the laptop in parallel, and verified against SHA256 before extraction. No microphone recordings or recognized text were uploaded.
+- Twenty-two tests pass, covering the audio bridge, language modes, preservation of Latin identifiers, model selection, missing weights, insufficient RAM, overlong Qwen recordings, and rejected execution without a verified CUDA allocation. Qt Release build passes.
+- On two public samples from Perle-ai/ASR_Code_Switch, Qwen 0.6B INT8 and Whisper small both made substantial errors. Automatic Qwen language identification could select unrelated languages. Persian language hints and vocabulary cues did not resolve mixed-speech errors and could corrupt English-only output. See `BILINGUAL_TEST.json`; this small test is not a general accuracy evaluation.
+- Qwen correctly transcribed one synthetic English-only sample containing Python, Linux and GitHub. In the Qt end-to-end test, the dedicated QLineEdit confirmed focus and logged `INSERTED: I use Python and Linux. Save the project to GitHub.`. The worker returned `device: cuda`, 700 MiB GPU allocation, 2010 MiB peak RSS and 8.96 seconds including model loading. This verifies local recognition and insertion, not human-speech accuracy or the physical recording shortcut.
+- Qwen INT8 may execute some ONNX operators on CPU. A worker-owned NVIDIA allocation was observed, but this does not establish that every operator executes on CUDA.
+- The test target was closed, Persian mode restored, and the updated application left running with FastConformer preferred. Qwen/mixed mode is labelled experimental, and the existing Persian default is retained because code-switching reliability was not demonstrated.
+
+- Qwen recordings are capped at 30 seconds to leave room for decoded text within the bounded 1024-token cache; other engines retain the 60-second limit.

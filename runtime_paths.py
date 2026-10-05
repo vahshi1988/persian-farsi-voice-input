@@ -23,3 +23,10 @@ def whisper_model_spec(name):
     if name not in choices:
         raise ValueError('Unsupported Whisper model: ' + str(name))
     return model_root() / name, choices[name]
+
+
+def qwen_model_spec(name):
+    """The lightweight ONNX checkpoint shares the FastConformer environment."""
+    if name != 'qwen3-asr-0.6b':
+        raise ValueError('Unsupported Qwen ASR model: ' + str(name))
+    return model_root() / 'qwen3-asr-0.6b-onnx-int8', 2200

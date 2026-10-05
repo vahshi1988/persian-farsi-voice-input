@@ -83,15 +83,29 @@ public:
         const QList<QPair<QString, QString>> choices{
             {"fastconformer", QStringLiteral("FastConformer فارسی (پیش‌فرض)")},
             {"small", QStringLiteral("Whisper small (کم‌حافظه)")},
-            {"large-v3-turbo", QStringLiteral("Whisper large-v3-turbo (مدل بزرگ‌تر)")}};
+            {"large-v3-turbo", QStringLiteral("Whisper large-v3-turbo (مدل بزرگ‌تر)")},
+            {"qwen3-asr-0.6b", QStringLiteral("Qwen3-ASR 0.6B INT8 (آزمایشی، محلی)")}};
         for (const auto &choice : choices) {
             auto *action = engines->addAction(choice.second);
             action->setCheckable(true); group->addAction(action);
             action->setChecked(selectedModel() == choice.first);
             connect(action, &QAction::triggered, this, [this, id = choice.first] {
                 settings.setValue("asrModel", id);
-                report(QStringLiteral("موتور برای ضبط بعدی: ") + id);
+                report(QStringLiteral("موتور برای ضبط بعدی: ") + effectiveModel());
             });
+        }
+        auto *languages = menu->addMenu(QStringLiteral("زبان گفتار"));
+        languageGroup = new QActionGroup(this);
+        languageGroup->setExclusive(true);
+        const QList<QPair<QString, QString>> modes{
+            {"fa", QStringLiteral("فارسی")},
+            {"mixed", QStringLiteral("فارسی و انگلیسی (آزمایشی)")}};
+        for (const auto &mode : modes) {
+            auto *action = languages->addAction(mode.second);
+            action->setCheckable(true); action->setData(mode.first);
+            languageGroup->addAction(action);
+            action->setChecked(languageMode() == mode.first);
+            connect(action, &QAction::triggered, this, [this, id = mode.first] { SetLanguageMode(id); });
         }
         auto *spelling = menu->addAction(QStringLiteral("اصلاح محافظه‌کارانهٔ واژه‌ها"));
         spelling->setCheckable(true);
@@ -166,9 +180,18 @@ public slots:
     Q_SCRIPTABLE void Show() { show(); raise(); activateWindow(); }
     Q_SCRIPTABLE void Quit() { qApp->quit(); }
     Q_SCRIPTABLE QVariantMap GetStatus() const {
-        return {{"selectedModel", selectedModel()}, {"keyboardReady", keyboardReady}, {"shortcutsReady", shortcutsReady},
+        return {{"selectedModel", selectedModel()}, {"effectiveModel", effectiveModel()}, {"languageMode", languageMode()},
+                {"keyboardReady", keyboardReady}, {"shortcutsReady", shortcutsReady},
                 {"recording", recording}, {"processing", busy}, {"status", status->text()},
                 {"lastText", lastText}, {"backend", backend}, {"diagnostics", QString::fromUtf8(diagnostics)}};
+    }
+    Q_SCRIPTABLE bool SetLanguageMode(const QString &mode) {
+        if (mode != "fa" && mode != "mixed") return false;
+        settings.setValue("languageMode", mode);
+        for (auto *action : languageGroup->actions()) action->setChecked(action->data().toString() == mode);
+        report((mode == "mixed" ? QStringLiteral("فارسی و انگلیسی؛ موتور ضبط بعدی: ")
+                               : QStringLiteral("فارسی؛ موتور ضبط بعدی: ")) + effectiveModel());
+        return true;
     }
     Q_SCRIPTABLE void Setup() {
         if (keyboardReady || setupBusy) return;
@@ -199,7 +222,7 @@ public slots:
         rawPath = audio->fileName(); audio->close();
         recorder.start(python, {QCoreApplication::applicationDirPath() + "/capture.py", "--output", rawPath});
         recording = true;
-        maxRecording.start(60000);
+        maxRecording.start(effectiveModel().startsWith("qwen3-asr-") ? 30000 : 60000);
         report(QStringLiteral("● در حال ضبط؛ پایان خودکار پس از دو ثانیه سکوت"));
     }
     Q_SCRIPTABLE void Cancel() {
@@ -301,6 +324,7 @@ private:
     QPlainTextEdit *preview = nullptr, *rawPreview = nullptr;
     QLabel *correctionSummary = nullptr;
     QSystemTrayIcon *tray = nullptr;
+    QActionGroup *languageGroup = nullptr;
     QProcess recorder, worker;
     QTimer maxRecording, workerTimeout;
     std::unique_ptr<QTemporaryFile> audio;
@@ -434,7 +458,16 @@ private:
     QString selectedModel() const {
         const auto legacy = settings.value("fastconformer", true).toBool() ? "fastconformer" : "small";
         const auto selected = settings.value("asrModel", legacy).toString();
-        return QStringList{"fastconformer", "small", "large-v3-turbo"}.contains(selected) ? selected : "fastconformer";
+        return QStringList{"fastconformer", "small", "large-v3-turbo", "qwen3-asr-0.6b"}.contains(selected) ? selected : "fastconformer";
+    }
+    QString languageMode() const {
+        return settings.value("languageMode", "fa").toString() == "mixed" ? "mixed" : "fa";
+    }
+    QString effectiveModel() const {
+        // Mixed-language dictation needs a multilingual recognizer. Keep the user's
+        // Persian engine preference for when they switch back to Persian mode.
+        const auto model = selectedModel();
+        return languageMode() == "mixed" && model == "fastconformer" ? "qwen3-asr-0.6b" : model;
     }
     static QString runtimePython(bool fast) {
         const auto override = qEnvironmentVariable(fast ? "VOICE_INPUT_FAST_PYTHON" : "VOICE_INPUT_PYTHON");
@@ -452,17 +485,19 @@ private:
         return configHome + "/voice-input/personal_dictionary.json";
     }
     void transcribe() {
-        workerTimeout.start(120000);
+        workerTimeout.start(effectiveModel().startsWith("qwen3-asr-") ? 240000 : 120000);
         if (worker.state() != QProcess::NotRunning) { worker.kill(); worker.waitForFinished(2000); }
         if (worker.state() == QProcess::NotRunning) {
             workerBuffer.clear(); diagnostics.clear();
             const auto python = runtimePython(false);
-            const bool useFastConformer = selectedModel() == "fastconformer";
-            const auto workerPython = runtimePython(useFastConformer);
+            const bool useFastConformer = effectiveModel() == "fastconformer";
+            const bool useQwen = effectiveModel().startsWith("qwen3-asr-");
+            const auto workerPython = runtimePython(useQwen || useFastConformer);
             QProcess paths;
             const QString probe = "import site,pathlib;print(':'.join(str(p/'lib') for base in site.getsitepackages() for p in (pathlib.Path(base)/'nvidia').glob('*') if (p/'lib').is_dir()))";
             QStringList libraries;
-            for (const auto &interpreter : QStringList{python, workerPython}) {
+            const auto interpreters = QStringList{python, workerPython};
+            for (const auto &interpreter : interpreters) {
                 paths.start(interpreter, {"-c", probe});
                 if (!paths.waitForFinished(5000) || paths.exitCode() != 0) {
                     busy = false; workerTimeout.stop(); cleanup(); report(QStringLiteral("محیط Python قابل اجرا نیست؛ scripts/setup.sh را اجرا کنید.")); return;
@@ -472,13 +507,15 @@ private:
             auto environment = QProcessEnvironment::systemEnvironment();
             environment.insert("LD_LIBRARY_PATH", libraries.join(':') + ":" + environment.value("LD_LIBRARY_PATH"));
             environment.insert("HF_HUB_OFFLINE", "1");
+            environment.insert("HF_HUB_DISABLE_TELEMETRY", "1");
             environment.insert("VOICE_INPUT_DICTIONARY", dictionaryPath());
             worker.setProcessEnvironment(environment);
-            const auto workerScript = useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
+            const auto workerScript = useQwen ? "/qwen_worker.py" : useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
             worker.start(workerPython, {QCoreApplication::applicationDirPath() + workerScript});
             if (!worker.waitForStarted(3000)) return;
         }
-        QJsonObject request{{"path", rawPath}, {"language", "fa"}, {"model", selectedModel()}, {"correctSpelling", settings.value("correctSpelling", true).toBool()}};
+        QJsonObject request{{"path", rawPath}, {"languageMode", languageMode()}, {"model", effectiveModel()},
+                            {"correctSpelling", settings.value("correctSpelling", true).toBool()}};
         worker.write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
     }
     bool setClipboard(const QString &text) {
@@ -526,6 +563,9 @@ int main(int argc, char **argv) {
         QObject::connect(edit, &QLineEdit::textChanged, &app, [](const QString &text) { qInfo().noquote() << "INSERTED:" << text; });
         window.setWindowTitle("Voice Input Paste Test");
         window.resize(480, 120); window.show(); window.raise(); window.activateWindow(); edit->setFocus();
+        QTimer::singleShot(1000, &window, [&window, edit] {
+            qInfo() << "TARGET_FOCUSED:" << (window.isActiveWindow() && edit->hasFocus());
+        });
         if (app.arguments().contains("--auto-exit")) QTimer::singleShot(30000, &app, &QCoreApplication::quit);
         return app.exec();
     }

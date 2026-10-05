@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-05",
+  "model": "csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
+  "runtime": "sherpa-onnx 1.13.8 CUDA",
+  "gpu": "NVIDIA GeForce GTX 1660 Ti",
+  "archiveBytes": 853425113,
+  "archiveSha256": "6345daae6b0e563ab22dc854582a3df0ef6957eee3582eefdae2dea4bf248a05",
+  "audioSource": "https://huggingface.co/datasets/Perle-ai/ASR_Code_Switch",
+  "personalDictionary": "empty test dictionary",
+  "languageMode": "mixed",
+  "languageHint": null,
+  "hotwords": "",
+  "publicSamples": [
+    {
+      "sample": 0,
+      "reference": "این feature جدید کلی bug داره، باید تا قبل از deadline فیکسش کنیم.",
+      "durationSeconds": 3.913,
+      "qwen": {
+        "text": "In future, jadit kembali bergoda, pada takarablas deadline fix tersebut.",
+        "seconds": 9.89,
+        "peakRamMiB": 1980,
+        "gpuMemoryMiB": 446
+      },
+      "whisperSmall": {
+        "text": "این فیتر جدیت کولی باک داره بایت اقوالت Deadline Fixش بایت",
+        "wallSeconds": 3.14
+      }
+    },
+    {
+      "sample": 1,
+      "reference": "این character جدید خیلی over powered هست، باید تو patch بعدی nerf بشه.",
+      "durationSeconds": 7.297,
+      "qwen": {
+        "text": "In character，嘅Jedi，really overpowered test，boy，to patch up the nervy.",
+        "seconds": 10.35,
+        "peakRamMiB": 2032,
+        "gpuMemoryMiB": 446
+      },
+      "whisperSmall": {
+        "text": "این کارکتر جهدیت خیلی اورپاورت هست بایه اتو پچه بردی نیرف بشه",
+        "wallSeconds": 2.96
+      }
+    }
+  ],
+  "syntheticEnglish": {
+    "reference": "I use Python and Linux. Save the project to GitHub.",
+    "qwenText": "I use Python and Linux. Save the project to GitHub.",
+    "wallSeconds": 8.2,
+    "seconds": 7.62,
+    "peakRamMiB": 2007,
+    "gpuMemoryMiB": 684
+  },
+  "conclusion": "Both engines performed poorly on the two public code-switching samples. Qwen is optional and experimental; Persian FastConformer remains the default. This limited test does not establish general accuracy. GPU allocation is not proof that every INT8 operator executes on CUDA.",
+  "followupExperiments": "A Persian language hint and general Persian/English vocabulary cues improved some Persian output but did not resolve mixed-speech errors. The cues could corrupt English-only speech, so mixed mode retains automatic identification without hotwords.",
+  "qtInsertionTest": {
+    "input": "synthetic English-only PCM",
+    "target": "Dedicated focused Qt QLineEdit",
+    "insertedText": "I use Python and Linux. Save the project to GitHub.",
+    "device": "cuda",
+    "gpuMemoryMiB": 700,
+    "peakRamMiB": 2010,
+    "seconds": 8.96,
+    "persianDefaultRestored": true
+  }
+}
