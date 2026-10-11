@@ -3,9 +3,6 @@
 #include <QtNetwork>
 #include <functional>
 
-static const QString portalService = "org.freedesktop.portal.Desktop";
-static const QString portalPath = "/org/freedesktop/portal/desktop";
-static const QString portalInterface = "org.freedesktop.portal.RemoteDesktop";
 static const QString component = "voice-input";
 
 class VoiceInput : public QWidget {
@@ -20,9 +17,8 @@ public:
         auto *heading = new QLabel("<h2>ورودی صوتی در برنامه‌ها</h2>");
         layout->addWidget(heading);
         auto *help = new QLabel(QStringLiteral(
-            "۱. مجوز صفحه‌کلید را فعال کنید و این پنجره را ببندید.\n"
-            "۲. داخل کادر متنِ برنامهٔ مقصد کلیک کنید.\n"
-            "۳. Ctrl+Alt+W: شروع؛ دو ثانیه سکوت: پایان خودکار.\n"
+            "۱. داخل کادر متنِ برنامهٔ مقصد کلیک کنید.\n"
+            "۲. Ctrl+Alt+W: شروع؛ دو ثانیه سکوت: پایان خودکار.\n"
             "همان میانبر برای پایان دستی هم کار می‌کند.\n"
             "Ctrl+Alt+Escape: لغو ضبط یا پردازش.\n"
             "تا درج متن، کادر مقصد را عوض نکنید.\n"
@@ -32,9 +28,6 @@ public:
         status = new QLabel;
         status->setWordWrap(true);
         layout->addWidget(status);
-        auto *setup = new QPushButton(QStringLiteral("فعال‌کردن مجوز صفحه‌کلید"));
-        connect(setup, &QPushButton::clicked, this, &VoiceInput::Setup);
-        layout->addWidget(setup);
         preview = new QPlainTextEdit;
         preview->setReadOnly(true);
         preview->setPlaceholderText(QStringLiteral("آخرین متن در همین نشست؛ پردازش کاملاً محلی است"));
@@ -69,7 +62,6 @@ public:
         tray = new QSystemTrayIcon(QIcon(icon), this);
         auto *menu = new QMenu(this);
         menu->addAction(QStringLiteral("نمایش تنظیمات"), this, &VoiceInput::Show);
-        menu->addAction(QStringLiteral("فعال‌کردن مجوز صفحه‌کلید"), this, &VoiceInput::Setup);
         auto *terminal = menu->addAction(QStringLiteral("چسباندن در ترمینال (Ctrl+Shift+V)"));
         terminal->setCheckable(true);
         terminalMode = settings.value("terminalMode", false).toBool();
@@ -84,7 +76,8 @@ public:
             {"fastconformer", QStringLiteral("FastConformer فارسی (پیش‌فرض)")},
             {"small", QStringLiteral("Whisper small (کم‌حافظه)")},
             {"large-v3-turbo", QStringLiteral("Whisper large-v3-turbo (مدل بزرگ‌تر)")},
-            {"qwen3-asr-0.6b", QStringLiteral("Qwen3-ASR 0.6B INT8 (آزمایشی، محلی)")}};
+            {"qwen3-asr-0.6b", QStringLiteral("Qwen3-ASR 0.6B INT8 (آزمایشی، محلی)")},
+            {"google-cloud", QStringLiteral("Google Cloud Speech-to-Text (ابری)")}};
         for (const auto &choice : choices) {
             auto *action = engines->addAction(choice.second);
             action->setCheckable(true); group->addAction(action);
@@ -111,6 +104,8 @@ public:
         spelling->setCheckable(true);
         spelling->setChecked(settings.value("correctSpelling", true).toBool());
         connect(spelling, &QAction::toggled, this, [this](bool on) { settings.setValue("correctSpelling", on); });
+        auto *credentialAction = menu->addAction(QStringLiteral("فایل اعتبارنامه Google Cloud…"));
+        connect(credentialAction, &QAction::triggered, this, &VoiceInput::pickGoogleCredential);
         menu->addAction(QStringLiteral("واژه‌ها و اصلاحات شخصی"), this, &VoiceInput::editDictionary);
         menu->addAction(QStringLiteral("لغو"), this, &VoiceInput::Cancel);
         menu->addSeparator();
@@ -160,18 +155,22 @@ public:
                 report(QStringLiteral("پردازش گفتار متوقف شد: ") + QString::fromUtf8(worker.readAllStandardError()).right(800));
             }
         });
-        // Drain diagnostics continuously to avoid filling the worker's pipe.
         connect(&worker, &QProcess::readyReadStandardError, this, [this] {
             diagnostics = (diagnostics + worker.readAllStandardError()).right(4096);
         });
+        wtypeAvailable = !QStandardPaths::findExecutable("wtype").isEmpty();
         shortcutsReady = registerShortcuts();
-        report(shortcutsReady ? QStringLiteral("میانبر آماده؛ مجوز صفحه‌کلید را فعال کنید.")
-                              : QStringLiteral("ثبت میانبر KDE ناموفق بود؛ خروجی برنامه را بررسی کنید."));
+        if (!wtypeAvailable)
+            report(QStringLiteral("wtype پیدا نشد؛ sudo apt install wtype اجرا کنید."));
+        else if (!shortcutsReady)
+            report(QStringLiteral("ثبت میانبر KDE ناموفق بود؛ خروجی برنامه را بررسی کنید."));
+        else
+            report(QStringLiteral("آماده؛ در کادر مقصد Ctrl+Alt+W بزنید."));
     }
     ~VoiceInput() override {
         recording = false; sendAfterStop = false; busy = false;
         recorder.kill(); recorder.waitForFinished(2000);
-        worker.kill(); worker.waitForFinished(2000); cleanup(); closeSession();
+        worker.kill(); worker.waitForFinished(2000); cleanup();
         QDBusInterface accel("org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel");
         for (const auto &id : {QString("toggle"), QString("cancel")})
             accel.call("setInactive", actionId(id));
@@ -181,7 +180,7 @@ public slots:
     Q_SCRIPTABLE void Quit() { qApp->quit(); }
     Q_SCRIPTABLE QVariantMap GetStatus() const {
         return {{"selectedModel", selectedModel()}, {"effectiveModel", effectiveModel()}, {"languageMode", languageMode()},
-                {"keyboardReady", keyboardReady}, {"shortcutsReady", shortcutsReady},
+                {"wtypeAvailable", wtypeAvailable}, {"shortcutsReady", shortcutsReady},
                 {"recording", recording}, {"processing", busy}, {"status", status->text()},
                 {"lastText", lastText}, {"backend", backend}, {"diagnostics", QString::fromUtf8(diagnostics)}};
     }
@@ -192,12 +191,6 @@ public slots:
         report((mode == "mixed" ? QStringLiteral("فارسی و انگلیسی؛ موتور ضبط بعدی: ")
                                : QStringLiteral("فارسی؛ موتور ضبط بعدی: ")) + effectiveModel());
         return true;
-    }
-    Q_SCRIPTABLE void Setup() {
-        if (keyboardReady || setupBusy) return;
-        setupBusy = true;
-        report(QStringLiteral("منتظر مجوز KDE برای درج متن…"));
-        request("CreateSession", {}, {{"session_handle_token", token()}}, 1);
     }
     Q_SCRIPTABLE void Toggle() {
         if (busy) { report(QStringLiteral("در حال پردازش؛ برای لغو Ctrl+Alt+Escape بزنید.")); return; }
@@ -212,7 +205,7 @@ public slots:
             return;
         }
         if (recorder.state() != QProcess::NotRunning) return;
-        if (!keyboardReady) { report(QStringLiteral("ابتدا مجوز صفحه‌کلید را از تنظیمات فعال کنید.")); return; }
+        if (!wtypeAvailable) { report(QStringLiteral("wtype پیدا نشد؛ sudo apt install wtype اجرا کنید.")); return; }
         const QString python = runtimePython(false);
         if (!QFile::exists(python) || QStandardPaths::findExecutable("parec").isEmpty()) {
             report(QStringLiteral("Whisper یا ابزار ضبط parec پیدا نشد.")); return;
@@ -234,7 +227,7 @@ public slots:
         workerBuffer.clear(); cleanup(); report(QStringLiteral("لغو شد؛ آماده."));
     }
     Q_SCRIPTABLE bool TranscribeTestFile(const QString &path) {
-        if (!keyboardReady || busy || recording) return false;
+        if (!wtypeAvailable || busy || recording) return false;
         QFile input(path);
         if (!input.open(QIODevice::ReadOnly) || input.size() < 32000 || input.size() > 1920000) return false;
         audio.reset(new QTemporaryFile(QDir::tempPath() + "/voice-input-XXXXXX.pcm"));
@@ -243,9 +236,8 @@ public slots:
         rawPath = audio->fileName(); audio->close();
         busy = true; transcribe(); return true;
     }
-    // Explicit diagnostic command: caller selects a test field within three seconds.
     Q_SCRIPTABLE bool TestPaste(const QString &text) {
-        if (!keyboardReady || busy || recording) return false;
+        if (!wtypeAvailable || busy || recording) return false;
         const auto generation = pasteGeneration;
         QTimer::singleShot(3000, this, [this,text,generation] { if (generation == pasteGeneration) paste(text); }); return true;
     }
@@ -253,35 +245,6 @@ private slots:
     void shortcut(const QString &name, const QString &id, qlonglong) {
         if (name != component) return;
         if (id == "toggle") Toggle(); else if (id == "cancel") Cancel();
-    }
-    void portalResponse(uint code, const QVariantMap &results, const QDBusMessage &message) {
-        if (message.path() != requestPath) return;
-        QDBusConnection::sessionBus().disconnect(portalService, requestPath,
-            "org.freedesktop.portal.Request", "Response", this,
-            SLOT(portalResponse(uint,QVariantMap,QDBusMessage)));
-        requestPath.clear();
-        if (code != 0) { setupFailed(QStringLiteral("مجوز تأیید نشد؛ می‌توانید دوباره فعال کنید.")); return; }
-        if (phase == 1) {
-            sessionPath = results.value("session_handle").toString();
-            if (sessionPath.isEmpty()) { setupFailed("Portal returned no session"); return; }
-            QVariantMap options{{"types", uint(1)}, {"persist_mode", uint(2)}};
-            const auto restore = settings.value("restoreToken").toString();
-            if (!restore.isEmpty()) options["restore_token"] = restore;
-            request("SelectDevices", {QVariant::fromValue(QDBusObjectPath(sessionPath))}, options, 2);
-        } else if (phase == 2) {
-            request("Start", {QVariant::fromValue(QDBusObjectPath(sessionPath)), QString()}, {}, 3);
-        } else if (phase == 3) {
-            if (!(results.value("devices").toUInt() & 1)) { setupFailed("Keyboard permission missing"); return; }
-            keyboardReady = true; setupBusy = false;
-            if (results.contains("restore_token")) settings.setValue("restoreToken", results["restore_token"]);
-            QDBusConnection::sessionBus().connect(portalService, sessionPath,
-                "org.freedesktop.portal.Session", "Closed", this, SLOT(sessionClosed(QVariantMap)));
-            report(QStringLiteral("آماده؛ پنجره را ببندید و در کادر مقصد Ctrl+Alt+W بزنید."));
-        }
-    }
-    void sessionClosed(const QVariantMap &) {
-        sessionPath.clear(); keyboardReady = false; setupBusy = false; Cancel();
-        report(QStringLiteral("مجوز صفحه‌کلید پایان یافت؛ دوباره فعال کنید."));
     }
     void readWorker() {
         workerBuffer += worker.readAllStandardOutput();
@@ -328,16 +291,14 @@ private:
     QProcess recorder, worker;
     QTimer maxRecording, workerTimeout;
     std::unique_ptr<QTemporaryFile> audio;
-    QString rawPath, sessionPath, requestPath, lastText, rawText;
+    QString rawPath, lastText, rawText;
     QByteArray workerBuffer, diagnostics;
     QVariantMap backend;
     bool recording = false, busy = false, sendAfterStop = false;
-    bool keyboardReady = false, setupBusy = false, terminalMode = false, shortcutsReady = false;
-    int phase = 0;
+    bool wtypeAvailable = false, terminalMode = false, shortcutsReady = false;
     quint64 pasteGeneration = 0;
     void report(const QString &message) { status->setText(message); tray->setToolTip(message); qInfo().noquote() << message; }
     void cleanup() { audio.reset(); rawPath.clear(); }
-    static QString token() { return "v" + QUuid::createUuid().toString(QUuid::Id128); }
     static QStringList actionId(const QString &id) {
         return {component, id, QStringLiteral("ورودی صوتی"), id == "toggle" ? QStringLiteral("شروع / پایان ضبط") : QStringLiteral("لغو")};
     }
@@ -353,7 +314,6 @@ private:
             if (!available.value()) {
                 QDBusReply<QStringList> owner = accel.call("action", key);
                 if (owner.isValid() && owner.value().value(0) == component && owner.value().value(1) == id) {
-                    // Reconnect to the shortcut retained across app restarts.
                 } else if (id == "toggle" && owner.isValid() && owner.value().value(0) == "whisper-dictation.desktop"
                     && owner.value().value(1) == "_launch") {
                     const auto migrated = accel.call("setForeignShortcut", owner.value(), QVariant::fromValue(QList<int>{}));
@@ -364,7 +324,7 @@ private:
             }
             auto registered = accel.call("doRegister", action);
             if (registered.type() == QDBusMessage::ErrorMessage) return false;
-            QDBusReply<QList<int>> assigned = accel.call("setShortcut", action, QVariant::fromValue(QList<int>{key}), uint(6)); // SetPresent | NoAutoloading
+            QDBusReply<QList<int>> assigned = accel.call("setShortcut", action, QVariant::fromValue(QList<int>{key}), uint(6));
             if (!assigned.isValid() || !assigned.value().contains(key)) { qWarning() << assigned.error(); return false; }
         }
         QDBusReply<QDBusObjectPath> path = accel.call("getComponent", component);
@@ -372,34 +332,11 @@ private:
         return QDBusConnection::sessionBus().connect("org.kde.kglobalaccel", path.value().path(),
             "org.kde.kglobalaccel.Component", "globalShortcutPressed", this, SLOT(shortcut(QString,QString,qlonglong)));
     }
-    void request(const QString &method, QVariantList args, QVariantMap options, int nextPhase) {
-        phase = nextPhase;
-        const auto handleToken = token(); options["handle_token"] = handleToken;
-        QString sender = QDBusConnection::sessionBus().baseService().mid(1); sender.replace('.', '_');
-        requestPath = "/org/freedesktop/portal/desktop/request/" + sender + "/" + handleToken;
-        QDBusConnection::sessionBus().connect(portalService, requestPath,
-            "org.freedesktop.portal.Request", "Response", this, SLOT(portalResponse(uint,QVariantMap,QDBusMessage)));
-        args.append(options);
-        auto message = QDBusMessage::createMethodCall(portalService, portalPath, portalInterface, method);
-        message.setArguments(args);
-        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(message), this);
-        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this,watcher](QDBusPendingCallWatcher *) {
-            QDBusPendingReply<QDBusObjectPath> reply = *watcher;
-            if (reply.isError()) setupFailed(reply.error().message());
-            watcher->deleteLater();
-        });
-    }
-    void closeSession() {
-        if (!sessionPath.isEmpty()) {
-            QDBusInterface session(portalService, sessionPath, "org.freedesktop.portal.Session");
-            session.call(QDBus::NoBlock, "Close"); sessionPath.clear();
-        }
-        keyboardReady = false;
-    }
-    void setupFailed(const QString &error) {
-        if (!requestPath.isEmpty()) QDBusConnection::sessionBus().disconnect(portalService, requestPath,
-            "org.freedesktop.portal.Request", "Response", this, SLOT(portalResponse(uint,QVariantMap,QDBusMessage)));
-        requestPath.clear(); setupBusy = false; closeSession(); report(error);
+    void pickGoogleCredential() {
+        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("انتخاب فایل اعتبارنامه Google Cloud"), QString(), "JSON (*.json)");
+        if (path.isEmpty()) return;
+        settings.setValue("googleCredentialPath", path);
+        report(QStringLiteral("اعتبارنامه Google Cloud ذخیره شد: ") + QFileInfo(path).fileName());
     }
     void editDictionary() {
         const auto path = dictionaryPath();
@@ -458,16 +395,21 @@ private:
     QString selectedModel() const {
         const auto legacy = settings.value("fastconformer", true).toBool() ? "fastconformer" : "small";
         const auto selected = settings.value("asrModel", legacy).toString();
-        return QStringList{"fastconformer", "small", "large-v3-turbo", "qwen3-asr-0.6b"}.contains(selected) ? selected : "fastconformer";
+        return QStringList{"fastconformer", "small", "large-v3-turbo", "qwen3-asr-0.6b", "google-cloud"}.contains(selected) ? selected : "fastconformer";
     }
     QString languageMode() const {
         return settings.value("languageMode", "fa").toString() == "mixed" ? "mixed" : "fa";
     }
     QString effectiveModel() const {
-        // Mixed-language dictation needs a multilingual recognizer. Keep the user's
-        // Persian engine preference for when they switch back to Persian mode.
         const auto model = selectedModel();
         return languageMode() == "mixed" && model == "fastconformer" ? "qwen3-asr-0.6b" : model;
+    }
+    static QString googleCloudPython() {
+        const auto override = qEnvironmentVariable("VOICE_INPUT_GCLOUD_PYTHON");
+        if (!override.isEmpty()) return override;
+        const auto path = QDir::homePath() + "/.venvs/qt-stt/bin/python";
+        if (QFileInfo(path).isExecutable()) return path;
+        return path;
     }
     static QString runtimePython(bool fast) {
         const auto override = qEnvironmentVariable(fast ? "VOICE_INPUT_FAST_PYTHON" : "VOICE_INPUT_PYTHON");
@@ -492,7 +434,8 @@ private:
             const auto python = runtimePython(false);
             const bool useFastConformer = effectiveModel() == "fastconformer";
             const bool useQwen = effectiveModel().startsWith("qwen3-asr-");
-            const auto workerPython = runtimePython(useQwen || useFastConformer);
+            const bool useGoogleCloud = effectiveModel() == "google-cloud";
+            const auto workerPython = useGoogleCloud ? googleCloudPython() : runtimePython(useQwen || useFastConformer);
             QProcess paths;
             const QString probe = "import site,pathlib;print(':'.join(str(p/'lib') for base in site.getsitepackages() for p in (pathlib.Path(base)/'nvidia').glob('*') if (p/'lib').is_dir()))";
             QStringList libraries;
@@ -510,12 +453,14 @@ private:
             environment.insert("HF_HUB_DISABLE_TELEMETRY", "1");
             environment.insert("VOICE_INPUT_DICTIONARY", dictionaryPath());
             worker.setProcessEnvironment(environment);
-            const auto workerScript = useQwen ? "/qwen_worker.py" : useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
+            const auto workerScript = useGoogleCloud ? "/google_cloud_worker.py" : useQwen ? "/qwen_worker.py" : useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
             worker.start(workerPython, {QCoreApplication::applicationDirPath() + workerScript});
             if (!worker.waitForStarted(3000)) return;
         }
         QJsonObject request{{"path", rawPath}, {"languageMode", languageMode()}, {"model", effectiveModel()},
                             {"correctSpelling", settings.value("correctSpelling", true).toBool()}};
+        const auto credPath = settings.value("googleCredentialPath").toString();
+        if (!credPath.isEmpty()) request["credentialPath"] = credPath;
         worker.write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
     }
     bool setClipboard(const QString &text) {
@@ -527,27 +472,21 @@ private:
         QApplication::clipboard()->setText(text);
         return QApplication::clipboard()->text() == text;
     }
-    bool key(int code, uint state) {
-        QDBusInterface input(portalService, portalPath, portalInterface);
-        auto reply = input.call("NotifyKeyboardKeycode", QVariant::fromValue(QDBusObjectPath(sessionPath)), QVariantMap{}, code, state);
-        if (reply.type() == QDBusMessage::ErrorMessage) { qWarning() << reply.errorMessage(); return false; }
-        return true;
-    }
     void paste(const QString &text) {
-        if (!keyboardReady) { report(QStringLiteral("مجوز صفحه‌کلید فعال نیست؛ متن را از تنظیمات کپی کنید.")); return; }
         if (!setClipboard(text)) { report(QStringLiteral("کپی متن ناموفق بود.")); return; }
-        // Delay until the physical shortcut modifiers have been released.
         const auto generation = pasteGeneration;
         QTimer::singleShot(350, this, [this,generation] {
-            if (!keyboardReady || generation != pasteGeneration) return;
-            bool ok = key(29, 1); // Linux evdev left Ctrl
-            if (terminalMode) ok = key(42, 1) && ok;
-            ok = key(47, 1) && ok; // V
-            ok = key(47, 0) && ok;
-            if (terminalMode) ok = key(42, 0) && ok;
-            ok = key(29, 0) && ok;
+            if (generation != pasteGeneration) return;
+            QProcess wtype;
+            QStringList args{"-M", "ctrl"};
+            if (terminalMode) args << "-M" << "shift";
+            args << "-k" << "v";
+            if (terminalMode) args << "-m" << "shift";
+            args << "-m" << "ctrl";
+            wtype.start("wtype", args);
+            const bool ok = wtype.waitForFinished(3000) && wtype.exitCode() == 0;
             report(ok ? QStringLiteral("متن برای کادر فعال فرستاده شد؛ آماده.")
-                      : QStringLiteral("ارسال کلید ناموفق بود؛ متن را از تنظیمات کپی کنید."));
+                      : QStringLiteral("wtype ناموفق بود؛ متن را دستی بچسبانید."));
         });
     }
 };
@@ -579,7 +518,6 @@ int main(int argc, char **argv) {
     VoiceInput window;
     bus.registerObject("/VoiceInput", &window, QDBusConnection::ExportScriptableSlots);
     if (!app.arguments().contains("--background")) window.show();
-    if (app.arguments().contains("--setup")) QTimer::singleShot(500, &window, &VoiceInput::Setup);
     return app.exec();
 }
 #include "main.moc"
