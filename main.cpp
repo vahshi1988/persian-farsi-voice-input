@@ -2,6 +2,7 @@
 #include <QtDBus>
 #include <QtNetwork>
 #include <functional>
+#include <unistd.h>
 
 static const QString component = "voice-input";
 
@@ -77,7 +78,8 @@ public:
             {"small", QStringLiteral("Whisper small (کم‌حافظه)")},
             {"large-v3-turbo", QStringLiteral("Whisper large-v3-turbo (مدل بزرگ‌تر)")},
             {"qwen3-asr-0.6b", QStringLiteral("Qwen3-ASR 0.6B INT8 (آزمایشی، محلی)")},
-            {"google-cloud", QStringLiteral("Google Cloud Speech-to-Text (ابری)")}};
+            {"google-cloud", QStringLiteral("Google Cloud Speech-to-Text (ابری)")},
+            {"google-free", QStringLiteral("Google Web Speech (رایگان، بدون کلید)")}};
         for (const auto &choice : choices) {
             auto *action = engines->addAction(choice.second);
             action->setCheckable(true); group->addAction(action);
@@ -158,10 +160,10 @@ public:
         connect(&worker, &QProcess::readyReadStandardError, this, [this] {
             diagnostics = (diagnostics + worker.readAllStandardError()).right(4096);
         });
-        wtypeAvailable = !QStandardPaths::findExecutable("wtype").isEmpty();
+        wtypeAvailable = !QStandardPaths::findExecutable("ydotool").isEmpty();
         shortcutsReady = registerShortcuts();
         if (!wtypeAvailable)
-            report(QStringLiteral("wtype پیدا نشد؛ sudo apt install wtype اجرا کنید."));
+            report(QStringLiteral("ydotool پیدا نشد؛ sudo apt install ydotool اجرا کنید."));
         else if (!shortcutsReady)
             report(QStringLiteral("ثبت میانبر KDE ناموفق بود؛ خروجی برنامه را بررسی کنید."));
         else
@@ -205,7 +207,7 @@ public slots:
             return;
         }
         if (recorder.state() != QProcess::NotRunning) return;
-        if (!wtypeAvailable) { report(QStringLiteral("wtype پیدا نشد؛ sudo apt install wtype اجرا کنید.")); return; }
+        if (!wtypeAvailable) { report(QStringLiteral("ydotool پیدا نشد؛ sudo apt install ydotool اجرا کنید.")); return; }
         const QString python = runtimePython(false);
         if (!QFile::exists(python) || QStandardPaths::findExecutable("parec").isEmpty()) {
             report(QStringLiteral("Whisper یا ابزار ضبط parec پیدا نشد.")); return;
@@ -395,7 +397,7 @@ private:
     QString selectedModel() const {
         const auto legacy = settings.value("fastconformer", true).toBool() ? "fastconformer" : "small";
         const auto selected = settings.value("asrModel", legacy).toString();
-        return QStringList{"fastconformer", "small", "large-v3-turbo", "qwen3-asr-0.6b", "google-cloud"}.contains(selected) ? selected : "fastconformer";
+        return QStringList{"fastconformer", "small", "large-v3-turbo", "qwen3-asr-0.6b", "google-cloud", "google-free"}.contains(selected) ? selected : "fastconformer";
     }
     QString languageMode() const {
         return settings.value("languageMode", "fa").toString() == "mixed" ? "mixed" : "fa";
@@ -434,7 +436,7 @@ private:
             const auto python = runtimePython(false);
             const bool useFastConformer = effectiveModel() == "fastconformer";
             const bool useQwen = effectiveModel().startsWith("qwen3-asr-");
-            const bool useGoogleCloud = effectiveModel() == "google-cloud";
+            const bool useGoogleCloud = effectiveModel() == "google-cloud" || effectiveModel() == "google-free";
             const auto workerPython = useGoogleCloud ? googleCloudPython() : runtimePython(useQwen || useFastConformer);
             QProcess paths;
             const QString probe = "import site,pathlib;print(':'.join(str(p/'lib') for base in site.getsitepackages() for p in (pathlib.Path(base)/'nvidia').glob('*') if (p/'lib').is_dir()))";
@@ -453,7 +455,7 @@ private:
             environment.insert("HF_HUB_DISABLE_TELEMETRY", "1");
             environment.insert("VOICE_INPUT_DICTIONARY", dictionaryPath());
             worker.setProcessEnvironment(environment);
-            const auto workerScript = useGoogleCloud ? "/google_cloud_worker.py" : useQwen ? "/qwen_worker.py" : useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
+            const auto workerScript = effectiveModel() == "google-free" ? "/google_free_worker.py" : effectiveModel() == "google-cloud" ? "/google_cloud_worker.py" : useQwen ? "/qwen_worker.py" : useFastConformer ? "/fastconformer_worker.py" : "/worker.py";
             worker.start(workerPython, {QCoreApplication::applicationDirPath() + workerScript});
             if (!worker.waitForStarted(3000)) return;
         }
@@ -477,16 +479,25 @@ private:
         const auto generation = pasteGeneration;
         QTimer::singleShot(350, this, [this,generation] {
             if (generation != pasteGeneration) return;
-            QProcess wtype;
-            QStringList args{"-M", "ctrl"};
-            if (terminalMode) args << "-M" << "shift";
-            args << "-k" << "v";
-            if (terminalMode) args << "-m" << "shift";
-            args << "-m" << "ctrl";
-            wtype.start("wtype", args);
-            const bool ok = wtype.waitForFinished(3000) && wtype.exitCode() == 0;
+            QProcess ydotool;
+            auto env = QProcessEnvironment::systemEnvironment();
+            if (env.value("YDOTOOL_SOCKET").isEmpty()) {
+                const auto userSocket = QDir::tempPath() + "/.ydotool_socket";
+                const auto runSocket = QString("/run/user/%1/.ydotool_socket").arg(getuid());
+                if (QFile::exists(runSocket)) env.insert("YDOTOOL_SOCKET", runSocket);
+                else if (QFile::exists(userSocket)) env.insert("YDOTOOL_SOCKET", userSocket);
+            }
+            ydotool.setProcessEnvironment(env);
+            // ydotool key: keycode with modifier. 29=Ctrl, 42=Shift, 47=V
+            QStringList args{"key"};
+            if (terminalMode)
+                args << "29:1" << "42:1" << "47:1" << "47:0" << "42:0" << "29:0";
+            else
+                args << "29:1" << "47:1" << "47:0" << "29:0";
+            ydotool.start("ydotool", args);
+            const bool ok = ydotool.waitForFinished(3000) && ydotool.exitCode() == 0;
             report(ok ? QStringLiteral("متن برای کادر فعال فرستاده شد؛ آماده.")
-                      : QStringLiteral("wtype ناموفق بود؛ متن را دستی بچسبانید."));
+                      : QStringLiteral("ydotool ناموفق بود؛ ydotoold در حال اجراست؟"));
         });
     }
 };
